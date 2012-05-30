@@ -1,44 +1,60 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+#-*- coding:utf-8 -*-
+"""
+Palavras parser worker
+"""
 
-from subprocess import Popen, PIPE
+import subprocess
+import zmq
 import re
 import sys
-
+from nltk.tag import tuple2str
+from base import PushPullWorker
+from zmq import ZMQError
 
 PALAVRAS_ENCODING = sys.getfilesystemencoding()
 PALAVRAS_PATH = '/opt/palavras/'
-regexp_tag = re.compile('<[^>]+>')
 
-def process(text):
-    """Annotate a text using the PALAVRAS Part of Speech Tagger"""
-    base_parser = PALAVRAS_PATH + 'por.pl'
-    process = Popen([base_parser, '--morf'], stdin=PIPE, stdout=PIPE,
-                    stderr=PIPE)
-    stdout, stderr = process.communicate(text.encode(PALAVRAS_ENCODING))
-    data = []
-    for line in stdout.split('\n'):
-        if not line.startswith(' '):
-            token = line.strip()[2:-2]
-        else:
-            data.append((token.decode(PALAVRAS_ENCODING),
-                         get_syntatic_category(line.strip())))
-    return data
 
-def get_syntatic_category(message):
-    for word in regexp_tag.sub('', message).split():
-        if not word.startswith('"'):
-            return word
-    raise ValueError('Bad message')
+context = zmq.Context()
 
-def test_split_analysis():
-    assert get_syntatic_category(' "a" b') == 'b'
-    assert get_syntatic_category(' "a" b c') == 'b'
-    assert get_syntatic_category(' "a" <*> b c') == 'b'
-    assert get_syntatic_category(' "a" <q w c s> b c') == 'b'
+class PalavrasPOSTaggerWorker(PushPullWorker):
+    """
+    Worker to tag words in texts according to their morphological type
+    Annotate a portuguese text using the PALAVRAS Part of Speech Tagger
+    Expects to receive a JSON message with the following structure
+    {"text":"...","lang":"<language iso code>"} where text is a raw text string.
+    To be used together with the MongoUpdateSink class.
+    """
 
-if __name__ == '__main__':
-    test_split_analysis()
-    txtfile = '/home/rsouza/file.txt'
-    document_text = open(txtfile).read().decode(PALAVRAS_ENCODING)
-    print process(document_text)
+    def process(self,msg):
+        """Does the Portuguese POS tagging"""
+        base_parser = PALAVRAS_PATH + 'por.pl'
+        regexp_tag = re.compile('<[^>]+>')
+        if msg['lang'] != 'pt':
+            raise ValueError('Text is not in Portuguese')
+        try:
+            process = subprocess.Popen([base_parser, '--morf'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate(msg['text'].encode(PALAVRAS_ENCODING))
+            tagged = []
+            for line in stdout.split('\n'):
+                if not line.startswith(' '): #The token itself in Palavras output
+                    token = line.strip()[2:-2]
+                else:                        #All Morfological data. Only "Word Class" (Syntactic) will be used
+                    morf_data = line.strip()
+                    for word in regexp_tag.sub('', morf_data).split():
+                        if not word.startswith('"'): # The first word conforming the pattern is Word Class
+                            syntactic_category = word
+                            break
+                        else:
+                            raise ValueError('Text does not conform to standards')
+                    tagged.append((token.decode(PALAVRAS_ENCODING), syntactic_category))
+            tagged_text = ' '.join([tuple2str(t) for t in tagged])
+            msgout = {"database": msg['database'],
+                      "collection": msg['collection'],
+                      "spec": {"_id": msg['_id']},
+                      "update": {"$set": {'tagged_text': tagged_text}},
+                      "multi":False}
+            self.sender.send_json(msgout)
+        except ZMQError:
+            self.sender.send_json({'fail': 1})
