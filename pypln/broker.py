@@ -5,7 +5,6 @@ from multiprocessing import Process, Pipe, cpu_count
 from os import kill, getpid
 from time import sleep, time
 from signal import SIGKILL
-import zmq
 from pymongo import Connection
 from gridfs import GridFS
 from bson.objectid import ObjectId
@@ -70,11 +69,11 @@ class ManagerBroker(ManagerClient):
         self.logger.info('Broker started')
 
     def request(self, message):
-        self.manager_api.send_json(message)
+        self.send_api_request(message)
         self.logger.info('[API] Request to manager: {}'.format(message))
 
     def get_reply(self):
-        message = self.manager_api.recv_json()
+        message = self.get_api_reply()
         self.logger.info('[API] Reply from manager: {}'.format(message))
         return message
 
@@ -124,7 +123,7 @@ class ManagerBroker(ManagerClient):
     def start(self):
         self.started_at = time()
         self.connect_to_manager()
-        self.manager_broadcast.setsockopt(zmq.SUBSCRIBE, 'new job')
+        self.broadcast_subscribe('new job')
         self.get_configuration()
         self.connect_to_database()
         self.save_monitoring_information()
@@ -171,8 +170,8 @@ class ManagerBroker(ManagerClient):
                 #TODO: send a 'rejecting job' request to Manager
 
     def manager_has_job(self):
-        if self.manager_broadcast.poll(self.poll_time):
-            message = self.manager_broadcast.recv()
+        if self.broadcast_poll(self.poll_time):
+            message = self.broadcast_receive()
             self.logger.info('[Broadcast] Received from manager: {}'\
                              .format(message))
             #TODO: what if broker subscribe to another thing?

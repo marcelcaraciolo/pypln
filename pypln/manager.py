@@ -46,6 +46,10 @@ class Manager(object):
         self.api.send_json(message)
         self.logger.info('[API] Reply: {}'.format(message))
 
+    def broadcast_send(self, message):
+        self.broadcast.send(message)
+        self.logger.info('[Broadcast] Sent: {}'.format(message))
+
     def run(self):
         self.logger.info('Entering main loop')
         try:
@@ -64,8 +68,7 @@ class Manager(object):
                     self.pending_job_ids.append(message['job id'])
                     self.reply({'answer': 'job accepted',
                                         'job id': message['job id']})
-                    self.broadcast.send('new job')
-                    self.logger.info('[Broadcast] Sent "new job"')
+                    self.broadcast_send('new job')
                 elif command == 'get job':
                     if self.job_queue.empty():
                         self.reply({'worker': None})
@@ -84,8 +87,7 @@ class Manager(object):
                             self.reply({'answer': 'good job!'})
                             new_message = 'job finished: {} duration: {}'\
                                           .format(job_id, message['duration'])
-                            self.broadcast.send(new_message)
-                            self.logger.info('[Broadcast] Sent "new job"')
+                            self.broadcast_send(new_message)
                 else:
                     self.reply({'answer': 'unknown command'})
         except KeyboardInterrupt:
