@@ -31,11 +31,12 @@ import nltk
 import os
 import glob
 import time
+from collections import Counter
 from tags_dictionary import WORD_CLASSES, INF_TAGS #, SYN_TAGS, SUB_TAGS, VALENCY_TAGS
  
 PALAVRAS_ENCODING = sys.getfilesystemencoding()
 PALAVRAS_PATH = '/opt/palavras/'
-FILES_PATH = '/home/rsouza/'
+FILES_PATH = '/home/ludmilasalomao/Corpus/txt'
 base_parser = PALAVRAS_PATH + 'por.pl'
 parser_mode = '--dep'
 malt_parser = PALAVRAS_PATH + 'bin/visldep2malt' #Not used for now
@@ -65,6 +66,7 @@ def palavras_tagger(text):
     text_and_pos_tags = []
     count = 0    
     for line in stdout.split('\n'):
+        line = line.replace('SPECM', 'SPEC M') # Treating a bug in the output of Palavras parser
         count += 1
         if count%1000 == 0:
             print('Processing token:\t{0}'.format(count))        
@@ -107,7 +109,13 @@ def np_extractor(text_and_pos_tags):
             {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
             {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
             {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
-            '''
+    '''
+    original_np_rules = r"""
+        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
+    """
     chunking_parser = nltk.RegexpParser(nprules)
     chunked_tree = chunking_parser.parse(text_and_pos_tags)
     np_trees = [np.leaves() for np in chunked_tree if isinstance(np, nltk.tree.Tree) and np.node == 'NP']
@@ -126,7 +134,7 @@ def chunks2strings(chunks):
 
 
 if __name__ == '__main__':
-    txt_files_in_dir = files_finder()
+    txt_files_in_dir = files_finder(FILES_PATH)
     for txt_file in txt_files_in_dir:
         print('____________________________________________\n')
         print('Processing file:\t{0}\n'.format(txt_file))
@@ -139,14 +147,33 @@ if __name__ == '__main__':
         f = open('{0}_np.out'.format(txt_file), 'w')
         f.write('\n *** Noun Phrases on file:\t{0} *** \n\n'.format(txt_file))
         for np in noun_phrases: 
-            #print(np)
-            f.write('\n%s' % np)
+            f.write('\n{}'.format(np.encode('utf-8')))
         f.write('\n\n *** NP Frequencies on file:\t{0} ***\n\n'.format(txt_file))
         fd = nltk.FreqDist(word.lower() for word in noun_phrases)
         for np, freq in fd.items():
-            f.write('\nNP:\t{0}\t{1}'.format(np,freq))
-        #fd.plot(30)
+            f.write('\nNP:\t{0}\t{1}'.format(np.encode('utf-8'), freq))
+
+        f.write('\n\n')
+        pos_tag = [(x[0].lower(), x[1]) for x in parsed_text[1]]
+        freq_dist_tag = Counter()
+        freq_dist_word = Counter()
+        for pos_tuple in pos_tag:
+            word = pos_tuple[0].lower()
+            tag = pos_tuple[1]
+            if tag not in freq_dist_word:
+                freq_dist_word[tag] = Counter()
+            freq_dist_tag[tag] += 1
+            freq_dist_word[tag][word] += 1
+            
+        freq_dist_tag_ordered = freq_dist_tag.items()
+        freq_dist_tag_ordered.sort(lambda x, y: cmp(y[1], x[1]))
+        for key, value in freq_dist_tag_ordered:
+            words = []
+            freq_dist_word_ordered = freq_dist_word[key].items()
+            freq_dist_word_ordered.sort(lambda x, y: cmp(y[1], x[1]))
+            for word, word_count in freq_dist_word_ordered:
+                words.append('    {},{}'.format(word.encode('utf-8'), word_count))
+            f.write('{},{}\n{}\n\n'.format(key, value, '\n'.join(words)))
         f.close()
-        print('\nClosing file:\t{0}_np.out\n'.format(txt_file))     
-        
-        
+        print('\nClosing file:\t{0}_np.out\n'.format(txt_file))
+        #fd.plot(30)

@@ -1,202 +1,179 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-WORD_CLASSES = {'N':'Nouns', 
-                'PROP':'Proper nouns', 
-                'SPEC': 'Specifiers', 
-                'DET': 'Determiners',
-                'PERS':'Personal pronouns', 
-                'ADJ':'Adjectives',
-                'ADV':'Adverbs', 
-                'V':'Verbs', 
-                'NUM':'Numerals', 
-                'PRP':'Preposition',
-                'KS':'Subordinating conjunctions',
-                'KC':'Coordinationg conjunctions',
-                'IN':'Interjections',
-                'EC':'Hyphen-separated prefix',}
+"""
+Annotates a text using the PALAVRAS Part of Speech Tagger.
+The different levels of analysis and outputs are:
+A) Dependency Trees:
+    /opt/palavras/por.pl < filename
+    /opt/palavras/por.pl --dep < filename
+B) State of the art, noun and name semantics:
+    /opt/palavras/por.pl --sem < filename
+C) Morphology only (as cg cohorts):
+    /opt/palavras/por.pl --morf < filename
+D) Morphology plus syntax:
+    /opt/palavras/por.pl --syn < filename
+E) Semantic plus dependency trees:
+    /opt/palavras/por.pl --sem < filename | /opt/palavras/bin/cg2dep pt
+F) MALT XML output:
+    /opt/palavras/por.pl < filename | /opt/palavras/bin/visldep2malt
+G) MALT XML output plus name semantics:
+    /opt/palavras/por.pl < filename | /opt/palavras/bin/visldep2malt | /opt/palavras/bin/extra2sem
+H) Creates visl-style SOURCE and ID lines, as for input to graphical trees:
+    /opt/palavras/por.pl < filename | /opt/palavras/bin/dep2tree_pt
+I) TIGER XML output:
+    /opt/palavras/por.pl < filename | perl -wnpe 's/^=//;' | /opt/palavras/bin/visl2tiger.pl | /opt/palavras/bin/extra2sem
+"""
 
-INF_TAGS = {'M':'Male gender', 
-            'F':'Female gender', 
-            'M/F':'Neutral gender',
-            'S':'Singular number', 
-            'P':'Plural number', 
-            'S/P':'Neutral number',
-            'NOM':'Nominative case', 
-            'ACC':'Accusative case', 
-            'DAT':'Dative case',
-            'PIV':'Prepositive case', 
-            'ACC/DAT':'Accusative-Dative case', 
-            'DAT':'Nominative-Prepositive case', 
-            '1':'First person', 
-            '2':'Second person', 
-            '3':'Third person',
-            '1S':'First person singular', 
-            '2S':'Second person singular',
-            '3S':'Third person singular',
-            '1P':'First person plural', 
-            '2P':'Second person plural',
-            '3P':'Third person plural',
-            '1/3S':'First or Third person singular', 
-            '0/1/3S':'Impersonal or First or Third person singular',
-            'PR':'presente simples',
-            'IMPF':'preterito imperfeito', 
-            'PS':'preterito perfeito',
-            'MQP':'preterito mais-que-perfeito', 
-            'FUT':'futuro do presente', 
-            'COND':'futuro do preterito',
-            'IND':'indicativo', 
-            'SUBJ':'subjuntivo', 
-            'IMP':'imperativo', 
-            'VFIN':'Verbo Finito',
-            'INF':'infinitivo', 
-            'PCP':'participio', 
-            'GER':'gerundio'}
-
-SYN_TAGS = {'@SUBJ>':'subject', 
-            '@<SUBJ':'subject',
-            '@ACC>':'accusative direct object',
-            '@<ACC':'accusative direct object', 
-            '@DAT>':'dative object only pronominal', 
-            '@<DAT':'dative object only pronominal',
-            '@PIV>':'prepositional indirect object', 
-            '@<PIV':'prepositional indirect object',
-            '@ADVS> / @SA>':'adverbial object (place, time, duration, quantity), subject-related',
-            '@<ADVS / @<SA':'adverbial object (place, time, duration, quantity), subject-related',
-            '@ADVO> / @OA>':'adverbial object object-related',
-            '@<ADVO / @<OA':'adverbial object object-related',
-            '@SC>':'subject predicative',
-            '@<SC':'subject predicative',
-            '@OC>':'object predicative',
-            '@<OC':'object predicative',
-            '@ADVL>':'adverbial',
-            '@<ADVL':'adverbial',
-            '@PASS>':'agent of passive',
-            '@<PASS':'agent of passive', #All above clause arguments attach to the nearest main verb to the left [<] or right [>]
-            '@ADVL':'free adverbial phrase in non-sentence expression',
-            '@NPHR':'free noun phrase in non-sentence expression without verbs',
-            '@VOK':'vocative',
-            '@>N':'prenominal adject', 
-            '@N<':'postnominal adject', #both last attaches to the nearest NP-head that is not an adnominal itself
-            '@N<PRED':'postnominal in-group predicative', #or predicate in small clause introduced by com/sem',
-            '@APP':'identifying apposition',
-            '@>A':'prepositioned adverbial adject', #attaches to the nearest ADJ/PCP/ADV or attributive used N to the right 
-            '@A<': 'postpositioned adverbial adject', #or dependent/argument of attributive participle (with function tag attached
-            '@PRED>': 'forward free predicative', #refers to the following @SUBJ, even when this is incorporated in the VP 
-            '@<PRED': 'backward free predicative', #refers to the nearest NP-head to the left, or to the nearest @SUBJ to the left
-            '@P<': 'argument of preposition', 
-            '@S<': 'sentence anaphor', 
-            '@FAUX': 'finite auxiliary',
-            '@FMV': 'finite main verb', 
-            '@IAUX': 'infinite auxiliary', 
-            '@IMV': 'infinite main verb', 
-            '@PRT-AUX<': 'verb chain particle',
-            '@CO': 'coordinating conjunction', 
-            '@SUB': 'subordinating conjunction', 
-            '@KOMP<': 'argument of comparative',
-            '@COM': 'direct comparator without preceding comparative',
-            '@PRD': 'role predicator',
-            '@FOC>': 'focus marker',
-            '@<FOC': 'focus marker',
-            '@TOP': 'topic constituent',
-            '@#FS-': 'finite subclause', #combines with clausal role and intraclausal word tag, e.g.@#FS-<ACC @SUB for "não acredito que seja verdade") 
-            '@#ICL-': 'infinite subclause', #combines with clausal role and intraclausal word tag, e.g. @#ICL-SUBJ> @IMV in "consertar um relógio não é fácil") 
-            '@#ICL-AUX<': 'argument verb in verb chain', #refers to preceding auxiliary (the verb chain sequence @FAUX - @#ICL-AUX< is used, where both verbs have the same subject, @FMV - @#ICL-<ACC is used where the subjects are different) 
-            '@#AS-': 'averbal subclause', #combines with clausal role and intraclausal word tag, e.g. @#AS-<ADVL @ADVL> in "ajudou onde possível") 
-            '@AS<': 'argument of complementiser in averbal subclause'}
-
-SUB_TAGS = {'<artd>': 'definite article', # (DET)
-            '<arti>': 'indefinite article', # (DET)
-            '<quant>': 'quantifier pronoun', #(DET: <quant1>, <quant2>, <quant3>, SPEC: <quant0>) or intensifier adverb 
-            '<dem>': 'demonstrative pronoun', #(DET: <dem> SPEC: <dem0>) 
-            '<poss>': 'possessive pronoun', # (DET) 
-            '<refl>': 'reflexive personal pronoun', # ("se" PERS ACC, "si" PERS PIV) 
-            '<si>': 'reflexive use of 3. person possessive', 
-            '<reci>': 'reciprocal use of reflexive pronoun', #(= "um ao outro") 
-            '<coll>': 'collective reflexive', # ("reunir-se", "associar-se") 
-            '<diff>': 'differentiator', #(DET) (e.g. "e outros temas", "a mesma diferença") 
-            '<ident>': 'identator', #(DET) (e.g. "o próprio usuário", "a si mesmo") 
-            '<rel>': 'relative pronoun', #(DET, SPEC) 
-            '<interr>': 'interrogative pronoun', #(DET, SPEC) 
-            '<post-det>': 'typically located as post-determiner', #(DET @N'<) 
-            '<post-attr>': 'typically post-positioned adjective', #(ADJ @N'<) 
-            '<ante-attr>': 'typically pre-positioned adjective', #  (ADJ @>': 'N) 
-            '<adv>': 'can be used adverbially', # (ADJ @ADVL) 
-            '<ks>': 'relative adverb used like a subordinating conjunction',
-            '<kc>': 'conjunctional adverb', # (pois, entretanto)
-            '<det>': 'determiner usage/inflection of adverb', #("ela estava toda nua.") 
-            '<foc>': 'focus marker adverb', # (also forms of "ser") 
-            '<prp>': 'relative adverb used like a preposition', 
-            '<KOMP>': '<igual>', # equalling" comparative (ADJ, ADV) (e.g. "tanto", "tão") 
-            '<KOMP>': '<corr>', # correlating comparative (ADJ, ADV) (e.g. "mais velho", "melhor") 
-            '<komp>': '<igual>', # equalling" particle referring to comparative (e.g. "como", "quanto") 
-            '<komp>': '<corr>', # correlating" particle referring to comparative (e.g. "do=que") 
-            '<SUP>': 'superlative', 
-            '<setop>': 'operational adverb', # (eg. "não", "nunca", "ja'", "mais" in "não mais") 
-            '<dei>': 'discourse deictics', # (e.g. "aqui", "ontem") 
-            '<card >': 'cardinal', # (NUM) 
-            '<NUM-ord>': 'ordinal', #(ADJ) 
-            '<NUM-fract>': 'fraction-numeral', # (N) 
-            '<cif>': 'cipher', #<card>'NUM, <NUM-ord>, ADJ
-            '<sam->': 'first part of morphologically fused word pair', #("de" in "dele") 
-            '<-sam>': 'last part of morphologically fused word pair', #("ele" in "dele") 
-            '<*>': '1. letter capitalized', 
-            '<*1>': 'left quote attached', 
-            '<*2>': 'right quote attached', 
-            '<hyfen>': 'hyphenated word', 
-            '<ABBR>': 'abbreviation', 
-            '<prop>': 'noun, adjective etc. used as name' , #(upper case initial in mid-sentence) 
-            '<n>': 'adjective or participle used as a noun', # typically as head of a nominal phrase 
-            '<fmc>': 'finite main clause heading verb ',
-            '<co-acc>': '',
-            '<co-advl>': '',
-            '<co-app>': '',
-            '<co-dat>': '',
-            '<co-fmc>': '',
-            '<co-ger>': '',
-            '<co-inf>': '',
-            '<co-oc>': '',
-            '<co-pcv>': '',
-            '<co-postad>': '',
-            '<co-postnom>': '',
-            '<co-pred>': '',
-            '<co-prenom>': '',
-            '<co-prparg>': '',
-            '<co-sc>': '',
-            '<co-subj>': '',
-            '<co-vfin>': ''} #co-ordinator tags indicating what is co-ordinated
+import subprocess
+import sys
+import nltk
+import os
+import glob
+import time
+from collections import Counter
+from tags_dictionary import WORD_CLASSES, INF_TAGS #, SYN_TAGS, SUB_TAGS, VALENCY_TAGS
+ 
+PALAVRAS_ENCODING = sys.getfilesystemencoding()
+PALAVRAS_PATH = '/opt/palavras/'
+FILES_PATH = '/home/ludmilasalomao/Corpus/txt'
+base_parser = PALAVRAS_PATH + 'por.pl'
+parser_mode = '--dep'
+malt_parser = PALAVRAS_PATH + 'bin/visldep2malt' #Not used for now
+tiger_parser = PALAVRAS_PATH + 'bin/visl2tiger.pl' #Not used for now
 
 
-VALENCY_TAGS = {'<vt>': 'monotransitive verb with accusative object', 
-                '<vi>': '<ve> intransitive verb (ergative verb)', 
-                '<vtd>': 'ditransitive verb with accusative and dative objects',
-                '<PRP^vp>': 'monotransitive verb with prepositional object', # (headed by PRP) 
-                '<PRP^vtp>': 'ditransitive verb with accusative and prepositional objects', 
-                '<vK>': 'copula verb with subject predicative', 
-                '<vtK>': 'copula verb with object predicative', 
-                '<va>': 'transitive verb with adverbial argument', 
-                '<va+LOC>': '',
-                '<va+DIR>': '',
-                '<vta+LOC>': '',
-                '<vta+DIR>': '',
-                '<vt+QUANT>': 'transitive verb with NP as quantitative adverbial object', #(e.g. "pesar")
-                '<vt+TID>': ' transitive verb with NP as temporal adverbial object', #(e.g. "durar") 
-                '<vU>': 'impersonal verbs (normally in the 3S-person', #e.g. "chove") 
-                '<x>': 'auxiliary verb with infinitive', #(tagged @(F)AUX - @#ICL-AUX'<) 
-                '<x+PCP>': 'auxiliary verb with participle', #(tagged @(F)AUX - @#ICL-AUX'<) 
-                '<x+GER>': 'auxiliary verb with gerund', #(tagged @(F)AUX - @#ICL-AUX'<) 
-                '<PRP^xp>': 'auxiliary verb with (prepositional) auxiliary particle and infinitive', #(tagged as @(F)AUX - @PRT-AUX'< - @#ICL-AUX'<) 
-                '<xt>': 'auxiliary verb with infinitive clause subject in the accusative case', # and ACI-constructions', #(both tagged as @(F)MV - @SUBJ>': ' - @#ICL-ACC) 
-                '<PRP^xtp>': 'auxiliary verb with accusative object and prepositional object containing an infinitive clause with its (unexpressed) subject being identical to the preceding accusative object', # (tagged as @(F)MV - @'<ACC - @'<PIV - @#ICL-P'<) 
-                '<vr>': 'reflexive verbs', # (also '<vrp>': ', '<vaux-r>': ', '<vaux-rp>': ') 
-                '<vq>': 'cognitive" verb governing a que-sentence', 
-                '<qv>': 'impersonal" verb with que-subclause as subject predicative', #("parece que", "consta que") 
-                '<+interr>': 'discourse" verb or nominal governing an interrogative subclause', 
-                '<+n>': 'noun governing a name', # (PROP) (e.g. "o senhor X") 
-                '<+num>': 'noun governing a number', #(e.g. "cap. 7", "no dia 5 de dezembro") 
-                '<num+>': 'unit" noun', # (e.g. "20 metros") 
-                '<+INF>': 'governs infinitive', # (N, ADJ) 
-                '<+PRP>': 'governs prepositional phrase headed by PRP', #e.g. '<+sobre>': ' 
-                '<PRP+>': 'typically argument of preposition PRP',
-                '<+que>': '',
-                '<+PRP+que>': 'nominal governing a que-subclause'} #(N, ADJ)
+def files_finder(path=FILES_PATH):
+    files = []
+    print('\n__________________________________________\n')    
+    print('Preparing the set of files to process...\n')    
+    for infile in glob.glob(os.path.join(path, '*.txt') ):
+        print('Reading file:\t{0}'.format(infile))
+        files.append(infile)
+    return files
+
+
+def palavras_tagger(text):
+    t0 = time.time()
+    print('Sending to Palavras parser...\n')            
+    process = subprocess.Popen([base_parser, parser_mode], 
+                               stdin=subprocess.PIPE, 
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate(text.encode(PALAVRAS_ENCODING))
+    print('Processing Palavras output...\n')            
+    text_and_all_tags = []
+    text_and_pos_tags = []
+    count = 0    
+    for line in stdout.split('\n'):
+        line = line.replace('SPECM', 'SPEC M') # Treating a bug in the output of Palavras parser
+        count += 1
+        if count%1000 == 0:
+            print('Processing token:\t{0}'.format(count))        
+        line = line.strip().decode(PALAVRAS_ENCODING)
+        chunks = ''.join([chunk for chunk in line.split() if chunk.startswith('#')])
+        if line.isspace() or line == '':
+            text_and_all_tags.append(['blank line','','BL','','','',''])
+        elif line.startswith('<'):
+            text_and_all_tags.append(['end_sentence','','ES','','','',''])
+        elif line.startswith('$'):
+            non_word = line.split()[0][1:]
+            if non_word.isdigit():
+                non_word_type = 'number'
+            else:
+                non_word_type = 'punctuation'
+            text_and_all_tags.append(['non word', non_word, non_word_type, '', '', '', chunks])
+        elif len(line.split('\t')) < 2:  #Discard malformed lines
+            continue
+        else:
+            word = line.split('\t')[0].strip()    
+            lemma = line.split('\t')[1].split()[0]
+            syn_sem_tags = line.split('\t')[1].split()[1:]
+            pos_tag = ''.join([wc for wc in syn_sem_tags if wc in WORD_CLASSES])
+            secondary_tag = ' '.join([sct for sct in syn_sem_tags if sct.startswith('<')])            
+            inflexion_tag = ' '.join([it for it in syn_sem_tags if it in INF_TAGS])
+            syntactic_tag = ''.join([st for st in syn_sem_tags if st.startswith('@')])
+            text_and_all_tags.append([word, lemma, pos_tag, secondary_tag, inflexion_tag, syntactic_tag, chunks])
+    num_tokens = len(text_and_all_tags)
+    for position in range(num_tokens):
+        text_and_pos_tags.append((text_and_all_tags[position][0], text_and_all_tags[position][2]))
+    t1 = time.time() - t0
+    print('\n{0} tokens processed in {1:.2f} seconds ({2:.1f} tokens/second)\n'.format(count,t1,(count//t1)))
+    return text_and_all_tags, text_and_pos_tags #palavras style, nltk style
+
+
+def np_extractor(text_and_pos_tags):
+    # These rules may be fine tuned to catch smallers or bigger NPs    
+    nprules = r'''
+        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
+    '''
+    original_np_rules = r"""
+        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
+    """
+    chunking_parser = nltk.RegexpParser(nprules)
+    chunked_tree = chunking_parser.parse(text_and_pos_tags)
+    np_trees = [np.leaves() for np in chunked_tree if isinstance(np, nltk.tree.Tree) and np.node == 'NP']
+    np_list = []
+    for np in np_trees:
+        l = [word for word, tag in np]
+        np_list.append(l)
+    return np_list    
+
+
+def chunks2strings(chunks):
+    strings = []    
+    for l in chunks:
+        strings.append(' '.join(l))
+    return strings
+
+
+if __name__ == '__main__':
+    txt_files_in_dir = files_finder(FILES_PATH)
+    for txt_file in txt_files_in_dir:
+        print('____________________________________________\n')
+        print('Processing file:\t{0}\n'.format(txt_file))
+        document_text = open(txt_file,'r').read().decode(PALAVRAS_ENCODING)
+        parsed_text = palavras_tagger(document_text)
+        noun_phrases = np_extractor(parsed_text[1])
+        noun_phrases = chunks2strings(noun_phrases)
+        noun_phrases = [np for np in noun_phrases if len(np)>1] #Filtering single letters
+        print('Saving NPs to file:\t{0}_np.out'.format(txt_file))        
+        f = open('{0}_np.out'.format(txt_file), 'w')
+        f.write('\n *** Noun Phrases on file:\t{0} *** \n\n'.format(txt_file))
+        for np in noun_phrases: 
+            f.write('\n{}'.format(np.encode('utf-8')))
+        f.write('\n\n *** NP Frequencies on file:\t{0} ***\n\n'.format(txt_file))
+        fd = nltk.FreqDist(word.lower() for word in noun_phrases)
+        for np, freq in fd.items():
+            f.write('\nNP:\t{0}\t{1}'.format(np.encode('utf-8'), freq))
+
+        f.write('\n\n')
+        pos_tag = [(x[0].lower(), x[1]) for x in parsed_text[1]]
+        freq_dist_tag = Counter()
+        freq_dist_word = Counter()
+        for pos_tuple in pos_tag:
+            word = pos_tuple[0].lower()
+            tag = pos_tuple[1]
+            if tag not in freq_dist_word:
+                freq_dist_word[tag] = Counter()
+            freq_dist_tag[tag] += 1
+            freq_dist_word[tag][word] += 1
+            
+        freq_dist_tag_ordered = freq_dist_tag.items()
+        freq_dist_tag_ordered.sort(lambda x, y: cmp(y[1], x[1]))
+        for key, value in freq_dist_tag_ordered:
+            words = []
+            freq_dist_word_ordered = freq_dist_word[key].items()
+            freq_dist_word_ordered.sort(lambda x, y: cmp(y[1], x[1]))
+            for word, word_count in freq_dist_word_ordered:
+                words.append('    {},{}'.format(word.encode('utf-8'), word_count))
+            f.write('{},{}\n{}\n\n'.format(key, value, '\n'.join(words)))
+        f.close()
+        print('\nClosing file:\t{0}_np.out\n'.format(txt_file))
+        #fd.plot(30)
