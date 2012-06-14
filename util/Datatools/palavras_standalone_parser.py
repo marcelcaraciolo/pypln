@@ -25,18 +25,22 @@ I) TIGER XML output:
     /opt/palavras/por.pl < filename | perl -wnpe 's/^=//;' | /opt/palavras/bin/visl2tiger.pl | /opt/palavras/bin/extra2sem
 """
 
+
 import subprocess
 import sys
 import nltk
 import os
 import glob
 import time
+import codecs
 from collections import Counter
-from tags_dictionary import WORD_CLASSES, INF_TAGS #, SYN_TAGS, SUB_TAGS, VALENCY_TAGS
+from tags_dictionary import WORD_CLASSES, INF_TAGS, TRANSLATION_BUG #, SYN_TAGS, SUB_TAGS, VALENCY_TAGS
  
+#TEXT_ENCODING = 'ISO-8859-15'
+TEXT_ENCODING = 'utf-8'
 PALAVRAS_ENCODING = sys.getfilesystemencoding()
 PALAVRAS_PATH = '/opt/palavras/'
-FILES_PATH = '/home/ludmilasalomao/Corpus/txt'
+FILES_PATH = '/home/rsouza/palavras/corpus/'
 base_parser = PALAVRAS_PATH + 'por.pl'
 parser_mode = '--dep'
 malt_parser = PALAVRAS_PATH + 'bin/visldep2malt' #Not used for now
@@ -66,7 +70,8 @@ def palavras_tagger(text):
     text_and_pos_tags = []
     count = 0    
     for line in stdout.split('\n'):
-        line = line.replace('SPECM', 'SPEC M') # Treating a bug in the output of Palavras parser
+        for key, value in TRANSLATION_BUG.iteritems():
+            line = line.replace(key, value) # Treating a bug in the output of Palavras parser
         count += 1
         if count%1000 == 0:
             print('Processing token:\t{0}'.format(count))        
@@ -82,14 +87,30 @@ def palavras_tagger(text):
                 non_word_type = 'number'
             else:
                 non_word_type = 'punctuation'
-            text_and_all_tags.append(['non word', non_word, non_word_type, '', '', '', chunks])
+                text_and_all_tags.append(['non word', non_word, non_word_type, '', '', '', chunks])
         elif len(line.split('\t')) < 2:  #Discard malformed lines
             continue
         else:
-            word = line.split('\t')[0].strip()    
-            lemma = line.split('\t')[1].split()[0]
-            syn_sem_tags = line.split('\t')[1].split()[1:]
+            info = line.split('\t')
+            final = '\t'.join(info[1:]).split()
+            word = info[0].strip()    
+            lemma = final[0]
+            syn_sem_tags = final[1:]
             pos_tag = ''.join([wc for wc in syn_sem_tags if wc in WORD_CLASSES])
+            if not pos_tag:  # Treating a bug in the output of Palavras parser
+                for index, element in enumerate(syn_sem_tags):
+                    if element.startswith('<') or element.endswith('>'):
+                        pass
+                    else:
+                        print line.encode('utf8')
+                        print str(syn_sem_tags).encode('utf8')
+                        pos_tag = element
+                        if pos_tag not in WORD_CLASSES:
+                            pos_tag += syn_sem_tags[index + 1]
+                            pos_tag = TRANSLATION_BUG[pos_tag]
+                            break
+                        #print u'*** Modified line: "{}", new pos_tag: "{}"'.format(line, pos_tag).encode('utf8')
+                        print str(syn_sem_tags).encode('utf8')
             secondary_tag = ' '.join([sct for sct in syn_sem_tags if sct.startswith('<')])            
             inflexion_tag = ' '.join([it for it in syn_sem_tags if it in INF_TAGS])
             syntactic_tag = ''.join([st for st in syn_sem_tags if st.startswith('@')])
@@ -99,24 +120,21 @@ def palavras_tagger(text):
         text_and_pos_tags.append((text_and_all_tags[position][0], text_and_all_tags[position][2]))
     t1 = time.time() - t0
     print('\n{0} tokens processed in {1:.2f} seconds ({2:.1f} tokens/second)\n'.format(count,t1,(count//t1)))
+    print(text_and_pos_tags)    
     return text_and_all_tags, text_and_pos_tags #palavras style, nltk style
 
 
 def np_extractor(text_and_pos_tags):
     # These rules may be fine tuned to catch smallers or bigger NPs    
-    nprules = r'''
-        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
+    original_np_rules = r'''
+        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+(<KC>+<ADJ|ADV|NUM>+)*}
             {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
             {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
-    '''
-    original_np_rules = r"""
-        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
-    """
-    chunking_parser = nltk.RegexpParser(nprules)
+            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}            '''
+    np_rules = r'''
+        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N|PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC|V>*<N|PROP>*<KC|ADJ|ADV|NUM>*)*}
+            '''
+    chunking_parser = nltk.RegexpParser(np_rules)
     chunked_tree = chunking_parser.parse(text_and_pos_tags)
     np_trees = [np.leaves() for np in chunked_tree if isinstance(np, nltk.tree.Tree) and np.node == 'NP']
     np_list = []
@@ -134,15 +152,19 @@ def chunks2strings(chunks):
 
 
 if __name__ == '__main__':
+    tt0 = time.time()
     txt_files_in_dir = files_finder(FILES_PATH)
+    num_files = len(txt_files_in_dir)
     for txt_file in txt_files_in_dir:
         print('____________________________________________\n')
         print('Processing file:\t{0}\n'.format(txt_file))
-        document_text = open(txt_file,'r').read().decode(PALAVRAS_ENCODING)
+        document_text = codecs.open(txt_file, 'r', TEXT_ENCODING).read()
+        document_text = document_text.decode(PALAVRAS_ENCODING)
         parsed_text = palavras_tagger(document_text)
         noun_phrases = np_extractor(parsed_text[1])
         noun_phrases = chunks2strings(noun_phrases)
         noun_phrases = [np for np in noun_phrases if len(np)>1] #Filtering single letters
+
         print('Saving NPs to file:\t{0}_np.out'.format(txt_file))        
         f = open('{0}_np.out'.format(txt_file), 'w')
         f.write('\n *** Noun Phrases on file:\t{0} *** \n\n'.format(txt_file))
@@ -152,9 +174,12 @@ if __name__ == '__main__':
         fd = nltk.FreqDist(word.lower() for word in noun_phrases)
         for np, freq in fd.items():
             f.write('\nNP:\t{0}\t{1}'.format(np.encode('utf-8'), freq))
-
         f.write('\n\n')
+        
         pos_tag = [(x[0].lower(), x[1]) for x in parsed_text[1]]
+        #for word, tag in pos_tag:
+        #    if tag not in WORD_CLASSES:
+        #        print(word,' ', tag)
         freq_dist_tag = Counter()
         freq_dist_word = Counter()
         for pos_tuple in pos_tag:
@@ -164,7 +189,6 @@ if __name__ == '__main__':
                 freq_dist_word[tag] = Counter()
             freq_dist_tag[tag] += 1
             freq_dist_word[tag][word] += 1
-            
         freq_dist_tag_ordered = freq_dist_tag.items()
         freq_dist_tag_ordered.sort(lambda x, y: cmp(y[1], x[1]))
         for key, value in freq_dist_tag_ordered:
@@ -175,5 +199,8 @@ if __name__ == '__main__':
                 words.append('    {},{}'.format(word.encode('utf-8'), word_count))
             f.write('{},{}\n{}\n\n'.format(key, value, '\n'.join(words)))
         f.close()
+
         print('\nClosing file:\t{0}_np.out\n'.format(txt_file))
+        tt1 = time.time() - tt0
+        print('\nTotal processing time:\t{0:.2f} seconds ({1:.1f} seconds/file)\n'.format(tt1, (tt1//num_files)))
         #fd.plot(30)

@@ -1,179 +1,697 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""
-Annotates a text using the PALAVRAS Part of Speech Tagger.
-The different levels of analysis and outputs are:
-A) Dependency Trees:
-    /opt/palavras/por.pl < filename
-    /opt/palavras/por.pl --dep < filename
-B) State of the art, noun and name semantics:
-    /opt/palavras/por.pl --sem < filename
-C) Morphology only (as cg cohorts):
-    /opt/palavras/por.pl --morf < filename
-D) Morphology plus syntax:
-    /opt/palavras/por.pl --syn < filename
-E) Semantic plus dependency trees:
-    /opt/palavras/por.pl --sem < filename | /opt/palavras/bin/cg2dep pt
-F) MALT XML output:
-    /opt/palavras/por.pl < filename | /opt/palavras/bin/visldep2malt
-G) MALT XML output plus name semantics:
-    /opt/palavras/por.pl < filename | /opt/palavras/bin/visldep2malt | /opt/palavras/bin/extra2sem
-H) Creates visl-style SOURCE and ID lines, as for input to graphical trees:
-    /opt/palavras/por.pl < filename | /opt/palavras/bin/dep2tree_pt
-I) TIGER XML output:
-    /opt/palavras/por.pl < filename | perl -wnpe 's/^=//;' | /opt/palavras/bin/visl2tiger.pl | /opt/palavras/bin/extra2sem
-"""
+WORD_CLASSES = {'N':'Nouns', 
+                'PROP':'Proper nouns', 
+                'SPEC': 'Specifiers', 
+                'DET': 'Determiners',
+                'PERS':'Personal pronouns', 
+                'ADJ':'Adjectives',
+                'ADV':'Adverbs', 
+                'V':'Verbs', 
+                'NUM':'Numerals', 
+                'PRP':'Preposition',
+                'KS':'Subordinating conjunctions',
+                'KC':'Coordinationg conjunctions',
+                'IN':'Interjections',
+                'EC':'Hyphen-separated prefix',}
 
-import subprocess
-import sys
-import nltk
-import os
-import glob
-import time
-from collections import Counter
-from tags_dictionary import WORD_CLASSES, INF_TAGS #, SYN_TAGS, SUB_TAGS, VALENCY_TAGS
- 
-PALAVRAS_ENCODING = sys.getfilesystemencoding()
-PALAVRAS_PATH = '/opt/palavras/'
-FILES_PATH = '/home/ludmilasalomao/Corpus/txt'
-base_parser = PALAVRAS_PATH + 'por.pl'
-parser_mode = '--dep'
-malt_parser = PALAVRAS_PATH + 'bin/visldep2malt' #Not used for now
-tiger_parser = PALAVRAS_PATH + 'bin/visl2tiger.pl' #Not used for now
+INF_TAGS = {'M':'Male gender', 
+            'F':'Female gender', 
+            'M/F':'Neutral gender',
+            'S':'Singular number', 
+            'P':'Plural number', 
+            'S/P':'Neutral number',
+            'NOM':'Nominative case', 
+            'ACC':'Accusative case', 
+            'DAT':'Dative case',
+            'PIV':'Prepositive case', 
+            'ACC/DAT':'Accusative-Dative case', 
+            'DAT':'Nominative-Prepositive case', 
+            '1':'First person', 
+            '2':'Second person', 
+            '3':'Third person',
+            '1S':'First person singular', 
+            '2S':'Second person singular',
+            '3S':'Third person singular',
+            '1P':'First person plural', 
+            '2P':'Second person plural',
+            '3P':'Third person plural',
+            '1/3S':'First or Third person singular', 
+            '0/1/3S':'Impersonal or First or Third person singular',
+            'PR':'presente simples',
+            'IMPF':'preterito imperfeito', 
+            'PS':'preterito perfeito',
+            'MQP':'preterito mais-que-perfeito', 
+            'FUT':'futuro do presente', 
+            'COND':'futuro do preterito',
+            'IND':'indicativo', 
+            'SUBJ':'subjuntivo', 
+            'IMP':'imperativo', 
+            'VFIN':'Verbo Finito',
+            'INF':'infinitivo', 
+            'PCP':'participio', 
+            'GER':'gerundio'}
+
+SYN_TAGS = {'@SUBJ>':'subject', 
+            '@<SUBJ':'subject',
+            '@ACC>':'accusative direct object',
+            '@<ACC':'accusative direct object', 
+            '@DAT>':'dative object only pronominal', 
+            '@<DAT':'dative object only pronominal',
+            '@PIV>':'prepositional indirect object', 
+            '@<PIV':'prepositional indirect object',
+            '@ADVS> / @SA>':'adverbial object (place, time, duration, quantity), subject-related',
+            '@<ADVS / @<SA':'adverbial object (place, time, duration, quantity), subject-related',
+            '@ADVO> / @OA>':'adverbial object object-related',
+            '@<ADVO / @<OA':'adverbial object object-related',
+            '@SC>':'subject predicative',
+            '@<SC':'subject predicative',
+            '@OC>':'object predicative',
+            '@<OC':'object predicative',
+            '@ADVL>':'adverbial',
+            '@<ADVL':'adverbial',
+            '@PASS>':'agent of passive',
+            '@<PASS':'agent of passive', #All above clause arguments attach to the nearest main verb to the left [<] or right [>]
+            '@ADVL':'free adverbial phrase in non-sentence expression',
+            '@NPHR':'free noun phrase in non-sentence expression without verbs',
+            '@VOK':'vocative',
+            '@>N':'prenominal adject', 
+            '@N<':'postnominal adject', #both last attaches to the nearest NP-head that is not an adnominal itself
+            '@N<PRED':'postnominal in-group predicative', #or predicate in small clause introduced by com/sem',
+            '@APP':'identifying apposition',
+            '@>A':'prepositioned adverbial adject', #attaches to the nearest ADJ/PCP/ADV or attributive used N to the right 
+            '@A<': 'postpositioned adverbial adject', #or dependent/argument of attributive participle (with function tag attached
+            '@PRED>': 'forward free predicative', #refers to the following @SUBJ, even when this is incorporated in the VP 
+            '@<PRED': 'backward free predicative', #refers to the nearest NP-head to the left, or to the nearest @SUBJ to the left
+            '@P<': 'argument of preposition', 
+            '@S<': 'sentence anaphor', 
+            '@FAUX': 'finite auxiliary',
+            '@FMV': 'finite main verb', 
+            '@IAUX': 'infinite auxiliary', 
+            '@IMV': 'infinite main verb', 
+            '@PRT-AUX<': 'verb chain particle',
+            '@CO': 'coordinating conjunction', 
+            '@SUB': 'subordinating conjunction', 
+            '@KOMP<': 'argument of comparative',
+            '@COM': 'direct comparator without preceding comparative',
+            '@PRD': 'role predicator',
+            '@FOC>': 'focus marker',
+            '@<FOC': 'focus marker',
+            '@TOP': 'topic constituent',
+            '@#FS-': 'finite subclause', #combines with clausal role and intraclausal word tag, e.g.@#FS-<ACC @SUB for "não acredito que seja verdade") 
+            '@#ICL-': 'infinite subclause', #combines with clausal role and intraclausal word tag, e.g. @#ICL-SUBJ> @IMV in "consertar um relógio não é fácil") 
+            '@#ICL-AUX<': 'argument verb in verb chain', #refers to preceding auxiliary (the verb chain sequence @FAUX - @#ICL-AUX< is used, where both verbs have the same subject, @FMV - @#ICL-<ACC is used where the subjects are different) 
+            '@#AS-': 'averbal subclause', #combines with clausal role and intraclausal word tag, e.g. @#AS-<ADVL @ADVL> in "ajudou onde possível") 
+            '@AS<': 'argument of complementiser in averbal subclause'}
+
+TRANSLATION_BUG = {'ADJ0/1/3S': 'ADJ 0/1/3S',
+                   'ADJ1': 'ADJ 1',
+                   'ADJ1/3S': 'ADJ 1/3S',
+                   'ADJ1P': 'ADJ 1P',
+                   'ADJ1S': 'ADJ 1S',
+                   'ADJ2': 'ADJ 2',
+                   'ADJ2P': 'ADJ 2P',
+                   'ADJ2S': 'ADJ 2S',
+                   'ADJ3': 'ADJ 3',
+                   'ADJ3P': 'ADJ 3P',
+                   'ADJ3S': 'ADJ 3S',
+                   'ADJACC': 'ADJ ACC',
+                   'ADJACC/DAT': 'ADJ ACC/DAT',
+                   'ADJCOND': 'ADJ COND',
+                   'ADJDAT': 'ADJ DAT',
+                   'ADJF': 'ADJ F',
+                   'ADJFUT': 'ADJ FUT',
+                   'ADJGER': 'ADJ GER',
+                   'ADJIMP': 'ADJ IMP',
+                   'ADJIMPF': 'ADJ IMPF',
+                   'ADJIND': 'ADJ IND',
+                   'ADJINF': 'ADJ INF',
+                   'ADJM': 'ADJ M',
+                   'ADJM/F': 'ADJ M/F',
+                   'ADJMQP': 'ADJ MQP',
+                   'ADJNOM': 'ADJ NOM',
+                   'ADJP': 'ADJ P',
+                   'ADJPCP': 'ADJ PCP',
+                   'ADJPIV': 'ADJ PIV',
+                   'ADJPR': 'ADJ PR',
+                   'ADJPS': 'ADJ PS',
+                   'ADJS': 'ADJ S',
+                   'ADJS/P': 'ADJ S/P',
+                   'ADJSUBJ': 'ADJ SUBJ',
+                   'ADJVFIN': 'ADJ VFIN',
+                   'ADV0/1/3S': 'ADV 0/1/3S',
+                   'ADV1': 'ADV 1',
+                   'ADV1/3S': 'ADV 1/3S',
+                   'ADV1P': 'ADV 1P',
+                   'ADV1S': 'ADV 1S',
+                   'ADV2': 'ADV 2',
+                   'ADV2P': 'ADV 2P',
+                   'ADV2S': 'ADV 2S',
+                   'ADV3': 'ADV 3',
+                   'ADV3P': 'ADV 3P',
+                   'ADV3S': 'ADV 3S',
+                   'ADVACC': 'ADV ACC',
+                   'ADVACC/DAT': 'ADV ACC/DAT',
+                   'ADVCOND': 'ADV COND',
+                   'ADVDAT': 'ADV DAT',
+                   'ADVF': 'ADV F',
+                   'ADVFUT': 'ADV FUT',
+                   'ADVGER': 'ADV GER',
+                   'ADVIMP': 'ADV IMP',
+                   'ADVIMPF': 'ADV IMPF',
+                   'ADVIND': 'ADV IND',
+                   'ADVINF': 'ADV INF',
+                   'ADVM': 'ADV M',
+                   'ADVM/F': 'ADV M/F',
+                   'ADVMQP': 'ADV MQP',
+                   'ADVNOM': 'ADV NOM',
+                   'ADVP': 'ADV P',
+                   'ADVPCP': 'ADV PCP',
+                   'ADVPIV': 'ADV PIV',
+                   'ADVPR': 'ADV PR',
+                   'ADVPS': 'ADV PS',
+                   'ADVS': 'ADV S',
+                   'ADVS/P': 'ADV S/P',
+                   'ADVSUBJ': 'ADV SUBJ',
+                   'ADVVFIN': 'ADV VFIN',
+                   'DET0/1/3S': 'DET 0/1/3S',
+                   'DET1': 'DET 1',
+                   'DET1/3S': 'DET 1/3S',
+                   'DET1P': 'DET 1P',
+                   'DET1S': 'DET 1S',
+                   'DET2': 'DET 2',
+                   'DET2P': 'DET 2P',
+                   'DET2S': 'DET 2S',
+                   'DET3': 'DET 3',
+                   'DET3P': 'DET 3P',
+                   'DET3S': 'DET 3S',
+                   'DETACC': 'DET ACC',
+                   'DETACC/DAT': 'DET ACC/DAT',
+                   'DETCOND': 'DET COND',
+                   'DETDAT': 'DET DAT',
+                   'DETF': 'DET F',
+                   'DETFUT': 'DET FUT',
+                   'DETGER': 'DET GER',
+                   'DETIMP': 'DET IMP',
+                   'DETIMPF': 'DET IMPF',
+                   'DETIND': 'DET IND',
+                   'DETINF': 'DET INF',
+                   'DETM': 'DET M',
+                   'DETM/F': 'DET M/F',
+                   'DETMQP': 'DET MQP',
+                   'DETNOM': 'DET NOM',
+                   'DETP': 'DET P',
+                   'DETPCP': 'DET PCP',
+                   'DETPIV': 'DET PIV',
+                   'DETPR': 'DET PR',
+                   'DETPS': 'DET PS',
+                   'DETS': 'DET S',
+                   'DETS/P': 'DET S/P',
+                   'DETSUBJ': 'DET SUBJ',
+                   'DETVFIN': 'DET VFIN',
+                   'EC0/1/3S': 'EC 0/1/3S',
+                   'EC1': 'EC 1',
+                   'EC1/3S': 'EC 1/3S',
+                   'EC1P': 'EC 1P',
+                   'EC1S': 'EC 1S',
+                   'EC2': 'EC 2',
+                   'EC2P': 'EC 2P',
+                   'EC2S': 'EC 2S',
+                   'EC3': 'EC 3',
+                   'EC3P': 'EC 3P',
+                   'EC3S': 'EC 3S',
+                   'ECACC': 'EC ACC',
+                   'ECACC/DAT': 'EC ACC/DAT',
+                   'ECCOND': 'EC COND',
+                   'ECDAT': 'EC DAT',
+                   'ECF': 'EC F',
+                   'ECFUT': 'EC FUT',
+                   'ECGER': 'EC GER',
+                   'ECIMP': 'EC IMP',
+                   'ECIMPF': 'EC IMPF',
+                   'ECIND': 'EC IND',
+                   'ECINF': 'EC INF',
+                   'ECM': 'EC M',
+                   'ECM/F': 'EC M/F',
+                   'ECMQP': 'EC MQP',
+                   'ECNOM': 'EC NOM',
+                   'ECP': 'EC P',
+                   'ECPCP': 'EC PCP',
+                   'ECPIV': 'EC PIV',
+                   'ECPR': 'EC PR',
+                   'ECPS': 'EC PS',
+                   'ECS': 'EC S',
+                   'ECS/P': 'EC S/P',
+                   'ECSUBJ': 'EC SUBJ',
+                   'ECVFIN': 'EC VFIN',
+                   'IN0/1/3S': 'IN 0/1/3S',
+                   'IN1': 'IN 1',
+                   'IN1/3S': 'IN 1/3S',
+                   'IN1P': 'IN 1P',
+                   'IN1S': 'IN 1S',
+                   'IN2': 'IN 2',
+                   'IN2P': 'IN 2P',
+                   'IN2S': 'IN 2S',
+                   'IN3': 'IN 3',
+                   'IN3P': 'IN 3P',
+                   'IN3S': 'IN 3S',
+                   'INACC': 'IN ACC',
+                   'INACC/DAT': 'IN ACC/DAT',
+                   'INCOND': 'IN COND',
+                   'INDAT': 'IN DAT',
+                   'INF': 'IN F',
+                   'INFUT': 'IN FUT',
+                   'INGER': 'IN GER',
+                   'INIMP': 'IN IMP',
+                   'INIMPF': 'IN IMPF',
+                   'ININD': 'IN IND',
+                   'ININF': 'IN INF',
+                   'INM': 'IN M',
+                   'INM/F': 'IN M/F',
+                   'INMQP': 'IN MQP',
+                   'INNOM': 'IN NOM',
+                   'INP': 'IN P',
+                   'INPCP': 'IN PCP',
+                   'INPIV': 'IN PIV',
+                   'INPR': 'IN PR',
+                   'INPS': 'IN PS',
+                   'INS': 'IN S',
+                   'INS/P': 'IN S/P',
+                   'INSUBJ': 'IN SUBJ',
+                   'INVFIN': 'IN VFIN',
+                   'KC0/1/3S': 'KC 0/1/3S',
+                   'KC1': 'KC 1',
+                   'KC1/3S': 'KC 1/3S',
+                   'KC1P': 'KC 1P',
+                   'KC1S': 'KC 1S',
+                   'KC2': 'KC 2',
+                   'KC2P': 'KC 2P',
+                   'KC2S': 'KC 2S',
+                   'KC3': 'KC 3',
+                   'KC3P': 'KC 3P',
+                   'KC3S': 'KC 3S',
+                   'KCACC': 'KC ACC',
+                   'KCACC/DAT': 'KC ACC/DAT',
+                   'KCCOND': 'KC COND',
+                   'KCDAT': 'KC DAT',
+                   'KCF': 'KC F',
+                   'KCFUT': 'KC FUT',
+                   'KCGER': 'KC GER',
+                   'KCIMP': 'KC IMP',
+                   'KCIMPF': 'KC IMPF',
+                   'KCIND': 'KC IND',
+                   'KCINF': 'KC INF',
+                   'KCM': 'KC M',
+                   'KCM/F': 'KC M/F',
+                   'KCMQP': 'KC MQP',
+                   'KCNOM': 'KC NOM',
+                   'KCP': 'KC P',
+                   'KCPCP': 'KC PCP',
+                   'KCPIV': 'KC PIV',
+                   'KCPR': 'KC PR',
+                   'KCPS': 'KC PS',
+                   'KCS': 'KC S',
+                   'KCS/P': 'KC S/P',
+                   'KCSUBJ': 'KC SUBJ',
+                   'KCVFIN': 'KC VFIN',
+                   'KS0/1/3S': 'KS 0/1/3S',
+                   'KS1': 'KS 1',
+                   'KS1/3S': 'KS 1/3S',
+                   'KS1P': 'KS 1P',
+                   'KS1S': 'KS 1S',
+                   'KS2': 'KS 2',
+                   'KS2P': 'KS 2P',
+                   'KS2S': 'KS 2S',
+                   'KS3': 'KS 3',
+                   'KS3P': 'KS 3P',
+                   'KS3S': 'KS 3S',
+                   'KSACC': 'KS ACC',
+                   'KSACC/DAT': 'KS ACC/DAT',
+                   'KSCOND': 'KS COND',
+                   'KSDAT': 'KS DAT',
+                   'KSF': 'KS F',
+                   'KSFUT': 'KS FUT',
+                   'KSGER': 'KS GER',
+                   'KSIMP': 'KS IMP',
+                   'KSIMPF': 'KS IMPF',
+                   'KSIND': 'KS IND',
+                   'KSINF': 'KS INF',
+                   'KSM': 'KS M',
+                   'KSM/F': 'KS M/F',
+                   'KSMQP': 'KS MQP',
+                   'KSNOM': 'KS NOM',
+                   'KSP': 'KS P',
+                   'KSPCP': 'KS PCP',
+                   'KSPIV': 'KS PIV',
+                   'KSPR': 'KS PR',
+                   'KSPS': 'KS PS',
+                   'KSS': 'KS S',
+                   'KSS/P': 'KS S/P',
+                   'KSSUBJ': 'KS SUBJ',
+                   'KSVFIN': 'KS VFIN',
+                   'N0/1/3S': 'N 0/1/3S',
+                   'N1': 'N 1',
+                   'N1/3S': 'N 1/3S',
+                   'N1P': 'N 1P',
+                   'N1S': 'N 1S',
+                   'N2': 'N 2',
+                   'N2P': 'N 2P',
+                   'N2S': 'N 2S',
+                   'N3': 'N 3',
+                   'N3P': 'N 3P',
+                   'N3S': 'N 3S',
+                   'NACC': 'N ACC',
+                   'NACC/DAT': 'N ACC/DAT',
+                   'NCOND': 'N COND',
+                   'NDAT': 'N DAT',
+                   'NF': 'N F',
+                   'NFUT': 'N FUT',
+                   'NGER': 'N GER',
+                   'NIMP': 'N IMP',
+                   'NIMPF': 'N IMPF',
+                   'NIND': 'N IND',
+                   'NINF': 'N INF',
+                   'NM': 'N M',
+                   'NM/F': 'N M/F',
+                   'NMQP': 'N MQP',
+                   'NNOM': 'N NOM',
+                   'NP': 'N P',
+                   'NPCP': 'N PCP',
+                   'NPIV': 'N PIV',
+                   'NPR': 'N PR',
+                   'NPS': 'N PS',
+                   'NS': 'N S',
+                   'NS/P': 'N S/P',
+                   'NSUBJ': 'N SUBJ',
+                   'NUM0/1/3S': 'NUM 0/1/3S',
+                   'NUM1': 'NUM 1',
+                   'NUM1/3S': 'NUM 1/3S',
+                   'NUM1P': 'NUM 1P',
+                   'NUM1S': 'NUM 1S',
+                   'NUM2': 'NUM 2',
+                   'NUM2P': 'NUM 2P',
+                   'NUM2S': 'NUM 2S',
+                   'NUM3': 'NUM 3',
+                   'NUM3P': 'NUM 3P',
+                   'NUM3S': 'NUM 3S',
+                   'NUMACC': 'NUM ACC',
+                   'NUMACC/DAT': 'NUM ACC/DAT',
+                   'NUMCOND': 'NUM COND',
+                   'NUMDAT': 'NUM DAT',
+                   'NUMF': 'NUM F',
+                   'NUMFUT': 'NUM FUT',
+                   'NUMGER': 'NUM GER',
+                   'NUMIMP': 'NUM IMP',
+                   'NUMIMPF': 'NUM IMPF',
+                   'NUMIND': 'NUM IND',
+                   'NUMINF': 'NUM INF',
+                   'NUMM': 'NUM M',
+                   'NUMM/F': 'NUM M/F',
+                   'NUMMQP': 'NUM MQP',
+                   'NUMNOM': 'NUM NOM',
+                   'NUMP': 'NUM P',
+                   'NUMPCP': 'NUM PCP',
+                   'NUMPIV': 'NUM PIV',
+                   'NUMPR': 'NUM PR',
+                   'NUMPS': 'NUM PS',
+                   'NUMS': 'NUM S',
+                   'NUMS/P': 'NUM S/P',
+                   'NUMSUBJ': 'NUM SUBJ',
+                   'NUMVFIN': 'NUM VFIN',
+                   'NVFIN': 'N VFIN',
+                   'PERS0/1/3S': 'PERS 0/1/3S',
+                   'PERS1': 'PERS 1',
+                   'PERS1/3S': 'PERS 1/3S',
+                   'PERS1P': 'PERS 1P',
+                   'PERS1S': 'PERS 1S',
+                   'PERS2': 'PERS 2',
+                   'PERS2P': 'PERS 2P',
+                   'PERS2S': 'PERS 2S',
+                   'PERS3': 'PERS 3',
+                   'PERS3P': 'PERS 3P',
+                   'PERS3S': 'PERS 3S',
+                   'PERSACC': 'PERS ACC',
+                   'PERSACC/DAT': 'PERS ACC/DAT',
+                   'PERSCOND': 'PERS COND',
+                   'PERSDAT': 'PERS DAT',
+                   'PERSF': 'PERS F',
+                   'PERSFUT': 'PERS FUT',
+                   'PERSGER': 'PERS GER',
+                   'PERSIMP': 'PERS IMP',
+                   'PERSIMPF': 'PERS IMPF',
+                   'PERSIND': 'PERS IND',
+                   'PERSINF': 'PERS INF',
+                   'PERSM': 'PERS M',
+                   'PERSM/F': 'PERS M/F',
+                   'PERSMQP': 'PERS MQP',
+                   'PERSNOM': 'PERS NOM',
+                   'PERSP': 'PERS P',
+                   'PERSPCP': 'PERS PCP',
+                   'PERSPIV': 'PERS PIV',
+                   'PERSPR': 'PERS PR',
+                   'PERSPS': 'PERS PS',
+                   'PERSS': 'PERS S',
+                   'PERSS/P': 'PERS S/P',
+                   'PERSSUBJ': 'PERS SUBJ',
+                   'PERSVFIN': 'PERS VFIN',
+                   'PROP0/1/3S': 'PROP 0/1/3S',
+                   'PROP1': 'PROP 1',
+                   'PROP1/3S': 'PROP 1/3S',
+                   'PROP1P': 'PROP 1P',
+                   'PROP1S': 'PROP 1S',
+                   'PROP2': 'PROP 2',
+                   'PROP2P': 'PROP 2P',
+                   'PROP2S': 'PROP 2S',
+                   'PROP3': 'PROP 3',
+                   'PROP3P': 'PROP 3P',
+                   'PROP3S': 'PROP 3S',
+                   'PROPACC': 'PROP ACC',
+                   'PROPACC/DAT': 'PROP ACC/DAT',
+                   'PROPCOND': 'PROP COND',
+                   'PROPDAT': 'PROP DAT',
+                   'PROPF': 'PROP F',
+                   'PROPFUT': 'PROP FUT',
+                   'PROPGER': 'PROP GER',
+                   'PROPIMP': 'PROP IMP',
+                   'PROPIMPF': 'PROP IMPF',
+                   'PROPIND': 'PROP IND',
+                   'PROPINF': 'PROP INF',
+                   'PROPM': 'PROP M',
+                   'PROPM/F': 'PROP M/F',
+                   'PROPMQP': 'PROP MQP',
+                   'PROPNOM': 'PROP NOM',
+                   'PROPP': 'PROP P',
+                   'PROPPCP': 'PROP PCP',
+                   'PROPPIV': 'PROP PIV',
+                   'PROPPR': 'PROP PR',
+                   'PROPPS': 'PROP PS',
+                   'PROPS': 'PROP S',
+                   'PROPS/P': 'PROP S/P',
+                   'PROPSUBJ': 'PROP SUBJ',
+                   'PROPVFIN': 'PROP VFIN',
+                   'PRP0/1/3S': 'PRP 0/1/3S',
+                   'PRP1': 'PRP 1',
+                   'PRP1/3S': 'PRP 1/3S',
+                   'PRP1P': 'PRP 1P',
+                   'PRP1S': 'PRP 1S',
+                   'PRP2': 'PRP 2',
+                   'PRP2P': 'PRP 2P',
+                   'PRP2S': 'PRP 2S',
+                   'PRP3': 'PRP 3',
+                   'PRP3P': 'PRP 3P',
+                   'PRP3S': 'PRP 3S',
+                   'PRPACC': 'PRP ACC',
+                   'PRPACC/DAT': 'PRP ACC/DAT',
+                   'PRPCOND': 'PRP COND',
+                   'PRPDAT': 'PRP DAT',
+                   'PRPF': 'PRP F',
+                   'PRPFUT': 'PRP FUT',
+                   'PRPGER': 'PRP GER',
+                   'PRPIMP': 'PRP IMP',
+                   'PRPIMPF': 'PRP IMPF',
+                   'PRPIND': 'PRP IND',
+                   'PRPINF': 'PRP INF',
+                   'PRPM': 'PRP M',
+                   'PRPM/F': 'PRP M/F',
+                   'PRPMQP': 'PRP MQP',
+                   'PRPNOM': 'PRP NOM',
+                   'PRPP': 'PRP P',
+                   'PRPPCP': 'PRP PCP',
+                   'PRPPIV': 'PRP PIV',
+                   'PRPPR': 'PRP PR',
+                   'PRPPS': 'PRP PS',
+                   'PRPS': 'PRP S',
+                   'PRPS/P': 'PRP S/P',
+                   'PRPSUBJ': 'PRP SUBJ',
+                   'PRPVFIN': 'PRP VFIN',
+                   'SPEC0/1/3S': 'SPEC 0/1/3S',
+                   'SPEC1': 'SPEC 1',
+                   'SPEC1/3S': 'SPEC 1/3S',
+                   'SPEC1P': 'SPEC 1P',
+                   'SPEC1S': 'SPEC 1S',
+                   'SPEC2': 'SPEC 2',
+                   'SPEC2P': 'SPEC 2P',
+                   'SPEC2S': 'SPEC 2S',
+                   'SPEC3': 'SPEC 3',
+                   'SPEC3P': 'SPEC 3P',
+                   'SPEC3S': 'SPEC 3S',
+                   'SPECACC': 'SPEC ACC',
+                   'SPECACC/DAT': 'SPEC ACC/DAT',
+                   'SPECCOND': 'SPEC COND',
+                   'SPECDAT': 'SPEC DAT',
+                   'SPECF': 'SPEC F',
+                   'SPECFUT': 'SPEC FUT',
+                   'SPECGER': 'SPEC GER',
+                   'SPECIMP': 'SPEC IMP',
+                   'SPECIMPF': 'SPEC IMPF',
+                   'SPECIND': 'SPEC IND',
+                   'SPECINF': 'SPEC INF',
+                   'SPECM': 'SPEC M',
+                   'SPECM/F': 'SPEC M/F',
+                   'SPECMQP': 'SPEC MQP',
+                   'SPECNOM': 'SPEC NOM',
+                   'SPECP': 'SPEC P',
+                   'SPECPCP': 'SPEC PCP',
+                   'SPECPIV': 'SPEC PIV',
+                   'SPECPR': 'SPEC PR',
+                   'SPECPS': 'SPEC PS',
+                   'SPECS': 'SPEC S',
+                   'SPECS/P': 'SPEC S/P',
+                   'SPECSUBJ': 'SPEC SUBJ',
+                   'SPECVFIN': 'SPEC VFIN',
+                   'V0/1/3S': 'V 0/1/3S',
+                   'V1': 'V 1',
+                   'V1/3S': 'V 1/3S',
+                   'V1P': 'V 1P',
+                   'V1S': 'V 1S',
+                   'V2': 'V 2',
+                   'V2P': 'V 2P',
+                   'V2S': 'V 2S',
+                   'V3': 'V 3',
+                   'V3P': 'V 3P',
+                   'V3S': 'V 3S',
+                   'VACC': 'V ACC',
+                   'VACC/DAT': 'V ACC/DAT',
+                   'VCOND': 'V COND',
+                   'VDAT': 'V DAT',
+                   'VF': 'V F',
+                   'VFUT': 'V FUT',
+                   'VGER': 'V GER',
+                   'VIMP': 'V IMP',
+                   'VIMPF': 'V IMPF',
+                   'VIND': 'V IND',
+                   'VINF': 'V INF',
+                   'VM': 'V M',
+                   'VM/F': 'V M/F',
+                   'VMQP': 'V MQP',
+                   'VNOM': 'V NOM',
+                   'VP': 'V P',
+                   'VPCP': 'V PCP',
+                   'VPIV': 'V PIV',
+                   'VPR': 'V PR',
+                   'VPS': 'V PS',
+                   'VS': 'V S',
+                   'VS/P': 'V S/P',
+                   'VSUBJ': 'V SUBJ',
+                   'VVFIN': 'V VFIN',
+                   'VV': 'V VFIN',
+                   'VIN': 'V INF',
+                   'PRPADJ': 'PRP ADJ',
+                   'ADVPRP': 'ADV PRP'}
+
+SUB_TAGS = {'<artd>': 'definite article', # (DET)
+            '<arti>': 'indefinite article', # (DET)
+            '<quant>': 'quantifier pronoun', #(DET: <quant1>, <quant2>, <quant3>, SPEC: <quant0>) or intensifier adverb 
+            '<dem>': 'demonstrative pronoun', #(DET: <dem> SPEC: <dem0>) 
+            '<poss>': 'possessive pronoun', # (DET) 
+            '<refl>': 'reflexive personal pronoun', # ("se" PERS ACC, "si" PERS PIV) 
+            '<si>': 'reflexive use of 3. person possessive', 
+            '<reci>': 'reciprocal use of reflexive pronoun', #(= "um ao outro") 
+            '<coll>': 'collective reflexive', # ("reunir-se", "associar-se") 
+            '<diff>': 'differentiator', #(DET) (e.g. "e outros temas", "a mesma diferença") 
+            '<ident>': 'identator', #(DET) (e.g. "o próprio usuário", "a si mesmo") 
+            '<rel>': 'relative pronoun', #(DET, SPEC) 
+            '<interr>': 'interrogative pronoun', #(DET, SPEC) 
+            '<post-det>': 'typically located as post-determiner', #(DET @N'<) 
+            '<post-attr>': 'typically post-positioned adjective', #(ADJ @N'<) 
+            '<ante-attr>': 'typically pre-positioned adjective', #  (ADJ @>': 'N) 
+            '<adv>': 'can be used adverbially', # (ADJ @ADVL) 
+            '<ks>': 'relative adverb used like a subordinating conjunction',
+            '<kc>': 'conjunctional adverb', # (pois, entretanto)
+            '<det>': 'determiner usage/inflection of adverb', #("ela estava toda nua.") 
+            '<foc>': 'focus marker adverb', # (also forms of "ser") 
+            '<prp>': 'relative adverb used like a preposition', 
+            '<KOMP>': '<igual>', # equalling" comparative (ADJ, ADV) (e.g. "tanto", "tão") 
+            '<KOMP>': '<corr>', # correlating comparative (ADJ, ADV) (e.g. "mais velho", "melhor") 
+            '<komp>': '<igual>', # equalling" particle referring to comparative (e.g. "como", "quanto") 
+            '<komp>': '<corr>', # correlating" particle referring to comparative (e.g. "do=que") 
+            '<SUP>': 'superlative', 
+            '<setop>': 'operational adverb', # (eg. "não", "nunca", "ja'", "mais" in "não mais") 
+            '<dei>': 'discourse deictics', # (e.g. "aqui", "ontem") 
+            '<card >': 'cardinal', # (NUM) 
+            '<NUM-ord>': 'ordinal', #(ADJ) 
+            '<NUM-fract>': 'fraction-numeral', # (N) 
+            '<cif>': 'cipher', #<card>'NUM, <NUM-ord>, ADJ
+            '<sam->': 'first part of morphologically fused word pair', #("de" in "dele") 
+            '<-sam>': 'last part of morphologically fused word pair', #("ele" in "dele") 
+            '<*>': '1. letter capitalized', 
+            '<*1>': 'left quote attached', 
+            '<*2>': 'right quote attached', 
+            '<hyfen>': 'hyphenated word', 
+            '<ABBR>': 'abbreviation', 
+            '<prop>': 'noun, adjective etc. used as name' , #(upper case initial in mid-sentence) 
+            '<n>': 'adjective or participle used as a noun', # typically as head of a nominal phrase 
+            '<fmc>': 'finite main clause heading verb ',
+            '<co-acc>': '',
+            '<co-advl>': '',
+            '<co-app>': '',
+            '<co-dat>': '',
+            '<co-fmc>': '',
+            '<co-ger>': '',
+            '<co-inf>': '',
+            '<co-oc>': '',
+            '<co-pcv>': '',
+            '<co-postad>': '',
+            '<co-postnom>': '',
+            '<co-pred>': '',
+            '<co-prenom>': '',
+            '<co-prparg>': '',
+            '<co-sc>': '',
+            '<co-subj>': '',
+            '<co-vfin>': ''} #co-ordinator tags indicating what is co-ordinated
 
 
-def files_finder(path=FILES_PATH):
-    files = []
-    print('\n__________________________________________\n')    
-    print('Preparing the set of files to process...\n')    
-    for infile in glob.glob(os.path.join(path, '*.txt') ):
-        print('Reading file:\t{0}'.format(infile))
-        files.append(infile)
-    return files
-
-
-def palavras_tagger(text):
-    t0 = time.time()
-    print('Sending to Palavras parser...\n')            
-    process = subprocess.Popen([base_parser, parser_mode], 
-                               stdin=subprocess.PIPE, 
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate(text.encode(PALAVRAS_ENCODING))
-    print('Processing Palavras output...\n')            
-    text_and_all_tags = []
-    text_and_pos_tags = []
-    count = 0    
-    for line in stdout.split('\n'):
-        line = line.replace('SPECM', 'SPEC M') # Treating a bug in the output of Palavras parser
-        count += 1
-        if count%1000 == 0:
-            print('Processing token:\t{0}'.format(count))        
-        line = line.strip().decode(PALAVRAS_ENCODING)
-        chunks = ''.join([chunk for chunk in line.split() if chunk.startswith('#')])
-        if line.isspace() or line == '':
-            text_and_all_tags.append(['blank line','','BL','','','',''])
-        elif line.startswith('<'):
-            text_and_all_tags.append(['end_sentence','','ES','','','',''])
-        elif line.startswith('$'):
-            non_word = line.split()[0][1:]
-            if non_word.isdigit():
-                non_word_type = 'number'
-            else:
-                non_word_type = 'punctuation'
-            text_and_all_tags.append(['non word', non_word, non_word_type, '', '', '', chunks])
-        elif len(line.split('\t')) < 2:  #Discard malformed lines
-            continue
-        else:
-            word = line.split('\t')[0].strip()    
-            lemma = line.split('\t')[1].split()[0]
-            syn_sem_tags = line.split('\t')[1].split()[1:]
-            pos_tag = ''.join([wc for wc in syn_sem_tags if wc in WORD_CLASSES])
-            secondary_tag = ' '.join([sct for sct in syn_sem_tags if sct.startswith('<')])            
-            inflexion_tag = ' '.join([it for it in syn_sem_tags if it in INF_TAGS])
-            syntactic_tag = ''.join([st for st in syn_sem_tags if st.startswith('@')])
-            text_and_all_tags.append([word, lemma, pos_tag, secondary_tag, inflexion_tag, syntactic_tag, chunks])
-    num_tokens = len(text_and_all_tags)
-    for position in range(num_tokens):
-        text_and_pos_tags.append((text_and_all_tags[position][0], text_and_all_tags[position][2]))
-    t1 = time.time() - t0
-    print('\n{0} tokens processed in {1:.2f} seconds ({2:.1f} tokens/second)\n'.format(count,t1,(count//t1)))
-    return text_and_all_tags, text_and_pos_tags #palavras style, nltk style
-
-
-def np_extractor(text_and_pos_tags):
-    # These rules may be fine tuned to catch smallers or bigger NPs    
-    nprules = r'''
-        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
-    '''
-    original_np_rules = r"""
-        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
-    """
-    chunking_parser = nltk.RegexpParser(nprules)
-    chunked_tree = chunking_parser.parse(text_and_pos_tags)
-    np_trees = [np.leaves() for np in chunked_tree if isinstance(np, nltk.tree.Tree) and np.node == 'NP']
-    np_list = []
-    for np in np_trees:
-        l = [word for word, tag in np]
-        np_list.append(l)
-    return np_list    
-
-
-def chunks2strings(chunks):
-    strings = []    
-    for l in chunks:
-        strings.append(' '.join(l))
-    return strings
-
-
-if __name__ == '__main__':
-    txt_files_in_dir = files_finder(FILES_PATH)
-    for txt_file in txt_files_in_dir:
-        print('____________________________________________\n')
-        print('Processing file:\t{0}\n'.format(txt_file))
-        document_text = open(txt_file,'r').read().decode(PALAVRAS_ENCODING)
-        parsed_text = palavras_tagger(document_text)
-        noun_phrases = np_extractor(parsed_text[1])
-        noun_phrases = chunks2strings(noun_phrases)
-        noun_phrases = [np for np in noun_phrases if len(np)>1] #Filtering single letters
-        print('Saving NPs to file:\t{0}_np.out'.format(txt_file))        
-        f = open('{0}_np.out'.format(txt_file), 'w')
-        f.write('\n *** Noun Phrases on file:\t{0} *** \n\n'.format(txt_file))
-        for np in noun_phrases: 
-            f.write('\n{}'.format(np.encode('utf-8')))
-        f.write('\n\n *** NP Frequencies on file:\t{0} ***\n\n'.format(txt_file))
-        fd = nltk.FreqDist(word.lower() for word in noun_phrases)
-        for np, freq in fd.items():
-            f.write('\nNP:\t{0}\t{1}'.format(np.encode('utf-8'), freq))
-
-        f.write('\n\n')
-        pos_tag = [(x[0].lower(), x[1]) for x in parsed_text[1]]
-        freq_dist_tag = Counter()
-        freq_dist_word = Counter()
-        for pos_tuple in pos_tag:
-            word = pos_tuple[0].lower()
-            tag = pos_tuple[1]
-            if tag not in freq_dist_word:
-                freq_dist_word[tag] = Counter()
-            freq_dist_tag[tag] += 1
-            freq_dist_word[tag][word] += 1
-            
-        freq_dist_tag_ordered = freq_dist_tag.items()
-        freq_dist_tag_ordered.sort(lambda x, y: cmp(y[1], x[1]))
-        for key, value in freq_dist_tag_ordered:
-            words = []
-            freq_dist_word_ordered = freq_dist_word[key].items()
-            freq_dist_word_ordered.sort(lambda x, y: cmp(y[1], x[1]))
-            for word, word_count in freq_dist_word_ordered:
-                words.append('    {},{}'.format(word.encode('utf-8'), word_count))
-            f.write('{},{}\n{}\n\n'.format(key, value, '\n'.join(words)))
-        f.close()
-        print('\nClosing file:\t{0}_np.out\n'.format(txt_file))
-        #fd.plot(30)
+VALENCY_TAGS = {'<vt>': 'monotransitive verb with accusative object', 
+                '<vi>': '<ve> intransitive verb (ergative verb)', 
+                '<vtd>': 'ditransitive verb with accusative and dative objects',
+                '<PRP^vp>': 'monotransitive verb with prepositional object', # (headed by PRP) 
+                '<PRP^vtp>': 'ditransitive verb with accusative and prepositional objects', 
+                '<vK>': 'copula verb with subject predicative', 
+                '<vtK>': 'copula verb with object predicative', 
+                '<va>': 'transitive verb with adverbial argument', 
+                '<va+LOC>': '',
+                '<va+DIR>': '',
+                '<vta+LOC>': '',
+                '<vta+DIR>': '',
+                '<vt+QUANT>': 'transitive verb with NP as quantitative adverbial object', #(e.g. "pesar")
+                '<vt+TID>': ' transitive verb with NP as temporal adverbial object', #(e.g. "durar") 
+                '<vU>': 'impersonal verbs (normally in the 3S-person', #e.g. "chove") 
+                '<x>': 'auxiliary verb with infinitive', #(tagged @(F)AUX - @#ICL-AUX'<) 
+                '<x+PCP>': 'auxiliary verb with participle', #(tagged @(F)AUX - @#ICL-AUX'<) 
+                '<x+GER>': 'auxiliary verb with gerund', #(tagged @(F)AUX - @#ICL-AUX'<) 
+                '<PRP^xp>': 'auxiliary verb with (prepositional) auxiliary particle and infinitive', #(tagged as @(F)AUX - @PRT-AUX'< - @#ICL-AUX'<) 
+                '<xt>': 'auxiliary verb with infinitive clause subject in the accusative case', # and ACI-constructions', #(both tagged as @(F)MV - @SUBJ>': ' - @#ICL-ACC) 
+                '<PRP^xtp>': 'auxiliary verb with accusative object and prepositional object containing an infinitive clause with its (unexpressed) subject being identical to the preceding accusative object', # (tagged as @(F)MV - @'<ACC - @'<PIV - @#ICL-P'<) 
+                '<vr>': 'reflexive verbs', # (also '<vrp>': ', '<vaux-r>': ', '<vaux-rp>': ') 
+                '<vq>': 'cognitive" verb governing a que-sentence', 
+                '<qv>': 'impersonal" verb with que-subclause as subject predicative', #("parece que", "consta que") 
+                '<+interr>': 'discourse" verb or nominal governing an interrogative subclause', 
+                '<+n>': 'noun governing a name', # (PROP) (e.g. "o senhor X") 
+                '<+num>': 'noun governing a number', #(e.g. "cap. 7", "no dia 5 de dezembro") 
+                '<num+>': 'unit" noun', # (e.g. "20 metros") 
+                '<+INF>': 'governs infinitive', # (N, ADJ) 
+                '<+PRP>': 'governs prepositional phrase headed by PRP', #e.g. '<+sobre>': ' 
+                '<PRP+>': 'typically argument of preposition PRP',
+                '<+que>': '',
+                '<+PRP+que>': 'nominal governing a que-subclause'} #(N, ADJ)
