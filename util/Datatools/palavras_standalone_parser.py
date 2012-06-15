@@ -25,7 +25,6 @@ I) TIGER XML output:
     /opt/palavras/por.pl < filename | perl -wnpe 's/^=//;' | /opt/palavras/bin/visl2tiger.pl | /opt/palavras/bin/extra2sem
 """
 
-
 import subprocess
 import sys
 import nltk
@@ -36,11 +35,10 @@ import codecs
 from collections import Counter
 from tags_dictionary import WORD_CLASSES, INF_TAGS, TRANSLATION_BUG #, SYN_TAGS, SUB_TAGS, VALENCY_TAGS
  
-#TEXT_ENCODING = 'ISO-8859-15'
-TEXT_ENCODING = 'utf-8'
+TEXT_ENCODING = {1: 'UTF-8', 2: 'ISO-8859-15'}
 PALAVRAS_ENCODING = sys.getfilesystemencoding()
 PALAVRAS_PATH = '/opt/palavras/'
-FILES_PATH = '/home/rsouza/palavras/corpus/'
+FILES_PATH = '/home/rsouza/palavras/Ludmila/Agrupados/'
 base_parser = PALAVRAS_PATH + 'por.pl'
 parser_mode = '--dep'
 malt_parser = PALAVRAS_PATH + 'bin/visldep2malt' #Not used for now
@@ -120,7 +118,6 @@ def palavras_tagger(text):
         text_and_pos_tags.append((text_and_all_tags[position][0], text_and_all_tags[position][2]))
     t1 = time.time() - t0
     print('\n{0} tokens processed in {1:.2f} seconds ({2:.1f} tokens/second)\n'.format(count,t1,(count//t1)))
-    print(text_and_pos_tags)    
     return text_and_all_tags, text_and_pos_tags #palavras style, nltk style
 
 
@@ -149,7 +146,7 @@ def chunks2strings(chunks):
     for l in chunks:
         strings.append(' '.join(l))
     return strings
-
+    
 
 if __name__ == '__main__':
     tt0 = time.time()
@@ -158,7 +155,7 @@ if __name__ == '__main__':
     for txt_file in txt_files_in_dir:
         print('____________________________________________\n')
         print('Processing file:\t{0}\n'.format(txt_file))
-        document_text = codecs.open(txt_file, 'r', TEXT_ENCODING).read()
+        document_text = codecs.open(txt_file, 'r', TEXT_ENCODING[1]).read()
         document_text = document_text.decode(PALAVRAS_ENCODING)
         parsed_text = palavras_tagger(document_text)
         noun_phrases = np_extractor(parsed_text[1])
@@ -177,9 +174,6 @@ if __name__ == '__main__':
         f.write('\n\n')
         
         pos_tag = [(x[0].lower(), x[1]) for x in parsed_text[1]]
-        #for word, tag in pos_tag:
-        #    if tag not in WORD_CLASSES:
-        #        print(word,' ', tag)
         freq_dist_tag = Counter()
         freq_dist_word = Counter()
         for pos_tuple in pos_tag:
@@ -199,8 +193,6 @@ if __name__ == '__main__':
                 words.append('    {},{}'.format(word.encode('utf-8'), word_count))
             f.write('{},{}\n{}\n\n'.format(key, value, '\n'.join(words)))
         f.close()
-
         print('\nClosing file:\t{0}_np.out\n'.format(txt_file))
-        tt1 = time.time() - tt0
-        print('\nTotal processing time:\t{0:.2f} seconds ({1:.1f} seconds/file)\n'.format(tt1, (tt1//num_files)))
-        #fd.plot(30)
+    tt1 = time.time() - tt0
+    print('\nTotal processing time:\t{0:.2f} seconds ({1:.1f} seconds/file)\n'.format(tt1, (tt1//num_files)))
