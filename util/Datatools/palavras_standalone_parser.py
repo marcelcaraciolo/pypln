@@ -33,14 +33,14 @@ import glob
 import time
 import codecs
 from collections import Counter
-from tags_dictionary import WORD_CLASSES, INF_TAGS, TRANSLATION_BUG #, SYN_TAGS, SUB_TAGS, VALENCY_TAGS
+from tags_dictionary import WORD_CLASSES, INF_TAGS, DEP_MOD_BUG #, SYN_TAGS, SUB_TAGS, VALENCY_TAGS
  
-TEXT_ENCODING = {1: 'UTF-8', 2: 'ISO-8859-15'}
+FILES_ENCODING = {1: 'UTF-8', 2: 'ISO-8859-15'}
 PALAVRAS_ENCODING = sys.getfilesystemencoding()
+FILES_PATH = '/home/rsouza/corpus/'
 PALAVRAS_PATH = '/opt/palavras/'
-FILES_PATH = '/home/rsouza/palavras/Ludmila/Agrupados/'
 base_parser = PALAVRAS_PATH + 'por.pl'
-parser_mode = '--dep'
+parser_mode = '--syn'
 malt_parser = PALAVRAS_PATH + 'bin/visldep2malt' #Not used for now
 tiger_parser = PALAVRAS_PATH + 'bin/visl2tiger.pl' #Not used for now
 
@@ -68,24 +68,26 @@ def palavras_tagger(text):
     text_and_pos_tags = []
     count = 0    
     for line in stdout.split('\n'):
-        for key, value in TRANSLATION_BUG.iteritems():
-            line = line.replace(key, value) # Treating a bug in the output of Palavras parser
+
+        # Fix a bug in the output --dep mode of Palavras parser
+        #for key, value in DEP_MOD_BUG.iteritems():
+        #    line = line.replace(key, value)
         count += 1
         if count%1000 == 0:
             print('Processing token:\t{0}'.format(count))        
         line = line.strip().decode(PALAVRAS_ENCODING)
         chunks = ''.join([chunk for chunk in line.split() if chunk.startswith('#')])
         if line.isspace() or line == '':
-            text_and_all_tags.append(['blank line','','BL','','','',''])
+            text_and_all_tags.append(['SPACE','[ignore]','BL','','','',''])
         elif line.startswith('<'):
-            text_and_all_tags.append(['end_sentence','','ES','','','',''])
+            text_and_all_tags.append(['STOP','[ignore]','ES','','','',''])
         elif line.startswith('$'):
             non_word = line.split()[0][1:]
             if non_word.isdigit():
-                non_word_type = 'number'
+                non_word_type = 'NUM'
             else:
-                non_word_type = 'punctuation'
-                text_and_all_tags.append(['non word', non_word, non_word_type, '', '', '', chunks])
+                non_word_type = 'NW'
+            text_and_all_tags.append([non_word, '[ignore]', non_word_type, '', '', '', chunks])
         elif len(line.split('\t')) < 2:  #Discard malformed lines
             continue
         else:
@@ -94,21 +96,23 @@ def palavras_tagger(text):
             word = info[0].strip()    
             lemma = final[0]
             syn_sem_tags = final[1:]
-            pos_tag = ''.join([wc for wc in syn_sem_tags if wc in WORD_CLASSES])
-            if not pos_tag:  # Treating a bug in the output of Palavras parser
-                for index, element in enumerate(syn_sem_tags):
-                    if element.startswith('<') or element.endswith('>'):
-                        pass
-                    else:
-                        print line.encode('utf8')
-                        print str(syn_sem_tags).encode('utf8')
-                        pos_tag = element
-                        if pos_tag not in WORD_CLASSES:
-                            pos_tag += syn_sem_tags[index + 1]
-                            pos_tag = TRANSLATION_BUG[pos_tag]
-                            break
-                        #print u'*** Modified line: "{}", new pos_tag: "{}"'.format(line, pos_tag).encode('utf8')
-                        print str(syn_sem_tags).encode('utf8')
+            pos_tag = ''.join([wc for wc in syn_sem_tags if wc in WORD_CLASSES][0])#avoid picking two Word_Classes
+            
+            # Fix a bug in the output --dep mode of Palavras parser            
+            #if not pos_tag:
+            #    for index, element in enumerate(syn_sem_tags):
+            #        if element.startswith('<') or element.endswith('>'):
+            #            pass
+            #        else:
+            #            print line.encode('utf8')
+            #            print str(syn_sem_tags).encode('utf8')
+            #            pos_tag = element
+            #            if pos_tag not in WORD_CLASSES:
+            #                pos_tag += syn_sem_tags[index + 1]
+            #                pos_tag = TRANSLATION_BUG[pos_tag]
+            #                break
+            #            print u'*** Modified line: "{}", new pos_tag: "{}"'.format(line, pos_tag).encode('utf8')
+            #            print str(syn_sem_tags).encode('utf8')
             secondary_tag = ' '.join([sct for sct in syn_sem_tags if sct.startswith('<')])            
             inflexion_tag = ' '.join([it for it in syn_sem_tags if it in INF_TAGS])
             syntactic_tag = ''.join([st for st in syn_sem_tags if st.startswith('@')])
@@ -117,7 +121,7 @@ def palavras_tagger(text):
     for position in range(num_tokens):
         text_and_pos_tags.append((text_and_all_tags[position][0], text_and_all_tags[position][2]))
     t1 = time.time() - t0
-    print('\n{0} tokens processed in {1:.2f} seconds ({2:.1f} tokens/second)\n'.format(count,t1,(count//t1)))
+    print('\n{0} tokens processed in {1:.2f} seconds ({2:.1f} tokens/second)\n'.format(count,t1,(count//t1)))    
     return text_and_all_tags, text_and_pos_tags #palavras style, nltk style
 
 
@@ -155,7 +159,8 @@ if __name__ == '__main__':
     for txt_file in txt_files_in_dir:
         print('____________________________________________\n')
         print('Processing file:\t{0}\n'.format(txt_file))
-        document_text = codecs.open(txt_file, 'r', TEXT_ENCODING[1]).read()
+
+        document_text = codecs.open(txt_file, 'r', FILES_ENCODING[1]).read()
         document_text = document_text.decode(PALAVRAS_ENCODING)
         parsed_text = palavras_tagger(document_text)
         noun_phrases = np_extractor(parsed_text[1])
@@ -163,6 +168,7 @@ if __name__ == '__main__':
         noun_phrases = [np for np in noun_phrases if len(np)>1] #Filtering single letters
 
         print('Saving NPs to file:\t{0}_np.out'.format(txt_file))        
+
         f = open('{0}_np.out'.format(txt_file), 'w')
         f.write('\n *** Noun Phrases on file:\t{0} *** \n\n'.format(txt_file))
         for np in noun_phrases: 
@@ -190,8 +196,9 @@ if __name__ == '__main__':
             freq_dist_word_ordered = freq_dist_word[key].items()
             freq_dist_word_ordered.sort(lambda x, y: cmp(y[1], x[1]))
             for word, word_count in freq_dist_word_ordered:
-                words.append('    {},{}'.format(word.encode('utf-8'), word_count))
-            f.write('{},{}\n{}\n\n'.format(key, value, '\n'.join(words)))
+                words.append('\t{}\t\t{}'.format(word.encode('utf-8'), word_count))
+            f.write('{}:\t{}\n{}\n\n'.format(key, value, '\n'.join(words)))
+        
         f.close()
         print('\nClosing file:\t{0}_np.out\n'.format(txt_file))
     tt1 = time.time() - tt0
