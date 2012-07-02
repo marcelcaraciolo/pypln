@@ -16,6 +16,10 @@ __docformat__ = 'restructuredtext en'
 
 class TestMonitor(unittest.TestCase):
     def test_fetching_xminutes_from_db(self):
-        self.assertGreater(len(monitor.fetch_x_records(10)),0)
+        self.assertGreater(len(monitor.fetch_x_minutes(10)),0)
     def test_getting_stats(self):
         self.assertIsInstance(json.loads(monitor.get_cluster_stats()),dict)
+    def test_fetch_last_jobs(self):
+        self.assertIsInstance(monitor.fetch_last_jobs(),dict)
+        self.assertIsInstance(monitor.fetch_last_jobs().values(),list)
+
