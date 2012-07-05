@@ -70,8 +70,9 @@ def palavras_tagger(text):
     for line in stdout.split('\n'):
 
         # Fix a bug in the output --dep mode of Palavras parser
-        #for key, value in DEP_MOD_BUG.iteritems():
+        # for key, value in DEP_MOD_BUG.iteritems():
         #    line = line.replace(key, value)
+        
         count += 1
         if count%1000 == 0:
             print('Processing token:\t{0}'.format(count))        
@@ -96,9 +97,15 @@ def palavras_tagger(text):
             word = info[0].strip()    
             lemma = final[0]
             syn_sem_tags = final[1:]
-            pos_tag = ''.join([wc for wc in syn_sem_tags if wc in WORD_CLASSES][0])#avoid picking two Word_Classes
+            try:
+                pos_tag = ''.join([wc for wc in syn_sem_tags if wc in WORD_CLASSES][0])#avoid picking two Word_Classes
+            except IndexError:
+                print("Missing a word due to common bug in Palavras output:")
+                print(line)
+                print('\n')
+                continue
             
-            # Fix a bug in the output --dep mode of Palavras parser            
+            #Fix a bug in the output --dep mode of Palavras parser            
             #if not pos_tag:
             #    for index, element in enumerate(syn_sem_tags):
             #        if element.startswith('<') or element.endswith('>'):
@@ -113,6 +120,7 @@ def palavras_tagger(text):
             #                break
             #            print u'*** Modified line: "{}", new pos_tag: "{}"'.format(line, pos_tag).encode('utf8')
             #            print str(syn_sem_tags).encode('utf8')
+
             secondary_tag = ' '.join([sct for sct in syn_sem_tags if sct.startswith('<')])            
             inflexion_tag = ' '.join([it for it in syn_sem_tags if it in INF_TAGS])
             syntactic_tag = ''.join([st for st in syn_sem_tags if st.startswith('@')])
@@ -125,17 +133,14 @@ def palavras_tagger(text):
     return text_and_all_tags, text_and_pos_tags #palavras style, nltk style
 
 
-def np_extractor(text_and_pos_tags):
+def np_extractor(text_and_pos_tags, np_size='small'):
     # These rules may be fine tuned to catch smallers or bigger NPs    
-    original_np_rules = r'''
-        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC>*<N>+)*(<KC>+<ADJ|ADV|NUM>+)*}
-            {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<PROP>+<ADJ|ADV|NUM>*(<KC>+<ADJ|ADV|NUM>+)*}            '''
-    np_rules = r'''
-        NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N|PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC|V>*<N|PROP>*<KC|ADJ|ADV|NUM>*)*}
-            '''
-    chunking_parser = nltk.RegexpParser(np_rules)
+    np_rules = {'big': 
+        r'''NP: {(<DET>+<ADJ>+<KC>+)*<ADJ|ADV|DET|NUM>*<N|PROP>+(<ADJ|ADV|DET|NUM|PRP|SPEC|V>*<N|PROP>*<KC|ADJ|ADV|NUM>*)*}''',
+                'small':
+        r'''NP: {<ADJ|DET|NUM>*<N|PROP>+<ADJ|NUM>*}'''}
+
+    chunking_parser = nltk.RegexpParser(np_rules[np_size])
     chunked_tree = chunking_parser.parse(text_and_pos_tags)
     np_trees = [np.leaves() for np in chunked_tree if isinstance(np, nltk.tree.Tree) and np.node == 'NP']
     np_list = []
